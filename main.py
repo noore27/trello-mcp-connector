@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Trello MCP-Compatible Connector Server - Final Stable (v6.1)
+Trello MCP-Compatible Connector Server - Final Stable (v6.2)
 Author: Nuri Muhammet Birlik
 Compatible with ChatGPT MCP (protocol 2024-11-05)
 """
@@ -10,7 +10,7 @@ import json
 import asyncio
 import requests
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse, StreamingResponse, Response, RedirectResponse
+from fastapi.responses import JSONResponse, StreamingResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 
@@ -29,7 +29,7 @@ if not TRELLO_API_KEY or not TRELLO_TOKEN:
 app = FastAPI(
     title="Trello MCP Connector",
     description="MCP-compatible connector to access Trello boards and cards",
-    version="6.1.0"
+    version="6.2.0"
 )
 
 # CORS
@@ -94,16 +94,9 @@ def mcp_info_get():
 def mcp_options():
     return Response(status_code=204)
 
-# 🧭 POST /sse → redirect to GET /sse
-@app.post("/sse")
-@app.post("/sse/")
-async def sse_post_redirect():
-    print("↩️ Received POST /sse → redirecting to GET /sse (307)")
-    return RedirectResponse(url="/sse", status_code=307)
-
-# 🔥 GET /sse → MCP SSE handshake
-@app.get("/sse")
-@app.get("/sse/")
+# 🔥 GET + POST /sse → bağımsız SSE stream (redirect yok)
+@app.api_route("/sse", methods=["GET", "POST"])
+@app.api_route("/sse/", methods=["GET", "POST"])
 async def sse_endpoint(request: Request):
     """MCP-compatible SSE endpoint for ChatGPT"""
     print(f"🔌 MCP SSE connection via {request.method}")
