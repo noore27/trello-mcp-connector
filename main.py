@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """
-Trello MCP-Compatible Connector Server - ChatGPT Final MCP Spec ✅
+Trello MCP-Compatible Connector Server - FIXED VERSION
 Author: Nuri Muhammet Birlik
-Version: 4.0 (Spec-Compliant SSE + MCP Discovery)
-Purpose: Fully MCP-compatible FastAPI server for ChatGPT connectors
+Version: 5.0 (MCP Spec Compliant)
 """
 
 import os
@@ -12,17 +11,14 @@ import asyncio
 import requests
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse, Response
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
-# -------------------------------------------------------
 # Load environment
-# -------------------------------------------------------
 load_dotenv()
 
-# -------------------------------------------------------
 # Configuration
-# -------------------------------------------------------
 TRELLO_API_KEY = os.getenv("TRELLO_KEY")
 TRELLO_TOKEN = os.getenv("TRELLO_TOKEN")
 TRELLO_BASE = "https://api.trello.com/1"
@@ -33,21 +29,26 @@ if not TRELLO_API_KEY or not TRELLO_TOKEN:
 app = FastAPI(
     title="Trello MCP Connector",
     description="MCP-compatible connector to access Trello boards and cards",
-    version="4.0.0"
+    version="5.0.0"
 )
 
-# -------------------------------------------------------
+# CORS middleware - CRITICAL for ChatGPT
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 # Models
-# -------------------------------------------------------
 class SearchRequest(BaseModel):
     query: str
 
 class FetchRequest(BaseModel):
     card_id: str
 
-# -------------------------------------------------------
-# Helper: Trello GET
-# -------------------------------------------------------
+# Trello helper
 def trello_get(endpoint: str, params: dict = None):
     base = {"key": TRELLO_API_KEY, "token": TRELLO_TOKEN}
     if params:
@@ -56,24 +57,24 @@ def trello_get(endpoint: str, params: dict = None):
     r.raise_for_status()
     return r.json()
 
-# -------------------------------------------------------
-# Root
-# -------------------------------------------------------
+# Root endpoint
 @app.get("/")
 def root():
     return {"status": "ok", "message": "✅ Trello MCP Connector is running"}
 
-# -------------------------------------------------------
-# MCP Discovery Endpoint
-# -------------------------------------------------------
+# MCP Discovery Endpoint - FIXED FORMAT
 @app.get("/.well-known/mcp")
 def mcp_info_get():
-    """MCP discovery info (required by ChatGPT)"""
+    """MCP discovery info - ChatGPT compliant format"""
     return {
-        "name": "Trello MCP Connector",
-        "version": "1.0",
+        "name": "trello",
+        "version": "1.0.0",
         "description": "Access Trello boards and cards",
-        "capabilities": {"resources": {}, "tools": ["search", "fetch"]},
+        "protocolVersion": "2024-11-05",
+        "capabilities": {
+            "resources": {},
+            "tools": {}
+        },
         "tools": [
             {
                 "name": "search",
@@ -87,7 +88,7 @@ def mcp_info_get():
                         }
                     },
                     "required": ["query"]
-                },
+                }
             },
             {
                 "name": "fetch",
@@ -101,18 +102,78 @@ def mcp_info_get():
                         }
                     },
                     "required": ["card_id"]
-                },
-            },
-        ],
+                }
+            }
+        ]
     }
 
 @app.options("/.well-known/mcp")
 def mcp_options():
     return Response(status_code=204)
 
-# -------------------------------------------------------
-# MCP Tools
-# -------------------------------------------------------
+# SSE Endpoint - COMPLETELY REWRITTEN for MCP compliance
+@app.get("/sse")
+async def sse_endpoint(request: Request):
+    """MCP SSE endpoint - ChatGPT connector handshake"""
+    print("🔌 MCP SSE connection requested - Sending initialization")
+    
+    async def generate_events():
+        try:
+            # Send hello event immediately (MCP requirement)
+            hello_data = {
+                "protocol": "mcp",
+                "version": "2024-11-05",
+                "capabilities": {},
+                "serverInfo": {
+                    "name": "trello",
+                    "version": "1.0.0"
+                }
+            }
+            yield f"event: hello\ndata: {json.dumps(hello_data)}\n\n"
+            
+            # Send initialization notification (MCP requirement)
+            init_data = {
+                "protocol": "mcp", 
+                "version": "2024-11-05",
+                "capabilities": {},
+                "clientInfo": {
+                    "name": "chatgpt",
+                    "version": "1.0.0"
+                }
+            }
+            yield f"event: initialized\ndata: {json.dumps(init_data)}\n\n"
+            
+            # Keep connection alive for longer
+            for i in range(10):
+                await asyncio.sleep(1)
+                ping_data = {"event": "ping", "count": i}
+                yield f"event: ping\ndata: {json.dumps(ping_data)}\n\n"
+                
+        except Exception as e:
+            error_data = {"error": str(e)}
+            yield f"event: error\ndata: {json.dumps(error_data)}\n\n"
+    
+    return StreamingResponse(
+        generate_events(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Headers": "*",
+        }
+    )
+
+@app.post("/sse")
+async def sse_post():
+    """SSE POST endpoint"""
+    return JSONResponse({"status": "connected"})
+
+@app.options("/sse")
+def sse_options():
+    return Response(status_code=204)
+
+# Tools endpoints (search ve fetch aynı kalacak)
 @app.post("/tools/search")
 async def mcp_search(request: Request):
     try:
@@ -182,41 +243,7 @@ async def mcp_fetch(request: Request):
             "content": [{"type": "text", "text": json.dumps({"error": str(e)})}]
         })
 
-# -------------------------------------------------------
-# SSE Endpoint (MCP Handshake Ping)
-# -------------------------------------------------------
-@app.get("/sse/")
-async def sse_get():
-    """Compliant SSE ping endpoint for ChatGPT handshake"""
-    print("📡 GET /sse/ -> sending MCP-compliant SSE ping ✅")
-
-    async def event_stream():
-        yield "event: ping\ndata: ok\n\n"
-        await asyncio.sleep(0.2)
-        yield "event: close\ndata: bye\n\n"
-
-    headers = {
-        "Content-Type": "text/event-stream",
-        "Cache-Control": "no-cache",
-        "Connection": "keep-alive",
-        "Transfer-Encoding": "chunked"
-    }
-
-    return StreamingResponse(event_stream(), headers=headers)
-
-@app.post("/sse/")
-async def sse_post():
-    """Fallback for POST-based ping clients"""
-    print("📡 POST /sse/ -> returning JSON ping ✅")
-    return JSONResponse({"ping": "ok", "source": "sse-fallback"})
-
-@app.options("/sse/")
-def sse_options():
-    return Response(status_code=204)
-
-# -------------------------------------------------------
-# Health
-# -------------------------------------------------------
+# Health check
 @app.get("/health")
 def health_check():
     try:
@@ -225,9 +252,7 @@ def health_check():
     except Exception as e:
         return {"status": "unhealthy", "error": str(e)}
 
-# -------------------------------------------------------
 # Logging middleware
-# -------------------------------------------------------
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
     print(f"📡 {request.method} {request.url.path}")
@@ -235,11 +260,8 @@ async def log_requests(request: Request, call_next):
     print(f"✅ {request.method} {request.url.path} -> {response.status_code}")
     return response
 
-# -------------------------------------------------------
-# Run Server
-# -------------------------------------------------------
 if __name__ == "__main__":
     import uvicorn
-    port = int(os.environ.get("PORT", 10000))  # Render assigns dynamic port
+    port = int(os.environ.get("PORT", 10000))
     print(f"🚀 Starting Trello MCP server on port {port}")
     uvicorn.run(app, host="0.0.0.0", port=port)
