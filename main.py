@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 """
-Trello MCP-Compatible Connector Server - ChatGPT Handshake Final Fix ✅
+Trello MCP-Compatible Connector Server - ChatGPT Final MCP Spec ✅
 Author: Nuri Muhammet Birlik
-Version: 3.8 (SSE Ping - Text Stream, Immediate Close)
-Purpose: Full compatibility with ChatGPT MCP handshake (even behind Cloudflare)
+Version: 4.0 (Spec-Compliant SSE + MCP Discovery)
+Purpose: Fully MCP-compatible FastAPI server for ChatGPT connectors
 """
 
 import os
 import json
-import requests
 import asyncio
+import requests
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse, Response, StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse, Response
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
@@ -33,7 +33,7 @@ if not TRELLO_API_KEY or not TRELLO_TOKEN:
 app = FastAPI(
     title="Trello MCP Connector",
     description="MCP-compatible connector to access Trello boards and cards",
-    version="3.8.0"
+    version="4.0.0"
 )
 
 # -------------------------------------------------------
@@ -64,11 +64,11 @@ def root():
     return {"status": "ok", "message": "✅ Trello MCP Connector is running"}
 
 # -------------------------------------------------------
-# MCP Metadata
+# MCP Discovery Endpoint
 # -------------------------------------------------------
 @app.get("/.well-known/mcp")
 def mcp_info_get():
-    """Discovery endpoint for MCP"""
+    """MCP discovery info (required by ChatGPT)"""
     return {
         "name": "Trello MCP Connector",
         "version": "1.0",
@@ -91,13 +91,13 @@ def mcp_info_get():
             },
             {
                 "name": "fetch",
-                "description": "Get detailed information about a specific Trello card",
+                "description": "Fetch detailed information about a specific Trello card",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
                         "card_id": {
                             "type": "string",
-                            "description": "ID of the Trello card to fetch"
+                            "description": "Trello card ID"
                         }
                     },
                     "required": ["card_id"]
@@ -106,9 +106,9 @@ def mcp_info_get():
         ],
     }
 
-@app.post("/.well-known/mcp")
-def mcp_info_post():
-    return mcp_info_get()
+@app.options("/.well-known/mcp")
+def mcp_options():
+    return Response(status_code=204)
 
 # -------------------------------------------------------
 # MCP Tools
@@ -117,8 +117,8 @@ def mcp_info_post():
 async def mcp_search(request: Request):
     try:
         body = await request.json()
-        print(f"🔍 Search request received: {body}")
         query = body.get("arguments", {}).get("query", "")
+        print(f"🔍 Search query: {query}")
 
         if not query:
             return {"content": [{"type": "text", "text": json.dumps({"results": []})}]}
@@ -139,34 +139,30 @@ async def mcp_search(request: Request):
             }
             for c in data.get("cards", [])
         ]
-
-        print(f"✅ Search found {len(results)} results")
+        print(f"✅ Found {len(results)} results")
         return {"content": [{"type": "text", "text": json.dumps({"results": results}, ensure_ascii=False)}]}
     except Exception as e:
         print(f"❌ Search error: {e}")
         return JSONResponse(status_code=500, content={
-            "content": [{"type": "text", "text": json.dumps({"error": str(e)}, ensure_ascii=False)}]
+            "content": [{"type": "text", "text": json.dumps({"error": str(e)})}]
         })
 
 @app.post("/tools/fetch")
 async def mcp_fetch(request: Request):
     try:
         body = await request.json()
-        print(f"📥 Fetch request received: {body}")
         card_id = body.get("arguments", {}).get("card_id", "")
+        print(f"📥 Fetch card: {card_id}")
 
         if not card_id:
             return JSONResponse(status_code=400, content={
-                "content": [{"type": "text", "text": json.dumps({"error": "Missing card_id"}, ensure_ascii=False)}]
+                "content": [{"type": "text", "text": json.dumps({"error": "Missing card_id"})}]
             })
 
         card = trello_get(f"cards/{card_id}", {
             "fields": "name,desc,url,dateLastActivity,idList",
-            "members": "true",
-            "member_fields": "fullName,username",
         })
         list_info = trello_get(f"lists/{card.get('idList')}")
-
         result = {
             "id": card.get("id"),
             "title": card.get("name", "No Title"),
@@ -175,51 +171,48 @@ async def mcp_fetch(request: Request):
             "metadata": {
                 "source": "trello",
                 "lastActivity": card.get("dateLastActivity", ""),
-                "list": list_info.get("name", ""),
-                "listId": card.get("idList", ""),
-            },
+                "list": list_info.get("name", "")
+            }
         }
-
-        print(f"✅ Fetch completed for card: {result['title']}")
+        print(f"✅ Fetched card {result['title']}")
         return {"content": [{"type": "text", "text": json.dumps(result, ensure_ascii=False)}]}
     except Exception as e:
         print(f"❌ Fetch error: {e}")
         return JSONResponse(status_code=500, content={
-            "content": [{"type": "text", "text": json.dumps({"error": str(e)}, ensure_ascii=False)}]
+            "content": [{"type": "text", "text": json.dumps({"error": str(e)})}]
         })
 
 # -------------------------------------------------------
-# SSE Endpoints (Real ping - text/event-stream)
+# SSE Endpoint (MCP Handshake Ping)
 # -------------------------------------------------------
+@app.get("/sse/")
+async def sse_get():
+    """Compliant SSE ping endpoint for ChatGPT handshake"""
+    print("📡 GET /sse/ -> sending MCP-compliant SSE ping ✅")
+
+    async def event_stream():
+        yield "event: ping\ndata: ok\n\n"
+        await asyncio.sleep(0.2)
+        yield "event: close\ndata: bye\n\n"
+
+    headers = {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+        "Transfer-Encoding": "chunked"
+    }
+
+    return StreamingResponse(event_stream(), headers=headers)
+
+@app.post("/sse/")
+async def sse_post():
+    """Fallback for POST-based ping clients"""
+    print("📡 POST /sse/ -> returning JSON ping ✅")
+    return JSONResponse({"ping": "ok", "source": "sse-fallback"})
+
 @app.options("/sse/")
 def sse_options():
     return Response(status_code=204)
-
-@app.get("/sse/")
-async def sse_get():
-    """Send one real SSE ping then close (forces ChatGPT handshake)"""
-    print("📡 GET /sse/ -> sending SSE ping event and closing ✅")
-
-    async def event_stream():
-        yield "event: ping\ndata: ok\n\n"
-        await asyncio.sleep(0.1)
-        return
-
-    return StreamingResponse(event_stream(), media_type="text/event-stream", headers={"Connection": "close"})
-@app.options("/.well-known/mcp")
-def mcp_options():
-    return Response(status_code=204)
-@app.post("/sse/")
-async def sse_post(request: Request):
-    """Some clients (like ChatGPT) POST to /sse/ for handshake ping"""
-    print("📡 POST /sse/ -> sending SSE ping event and closing ✅")
-
-    async def event_stream():
-        yield "event: ping\ndata: ok\n\n"
-        await asyncio.sleep(0.5)
-        return
-
-    return StreamingResponse(event_stream(), media_type="text/event-stream", headers={"Connection": "close"})
 
 # -------------------------------------------------------
 # Health
@@ -238,24 +231,15 @@ def health_check():
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
     print(f"📡 {request.method} {request.url.path}")
-    if request.method == "POST" and "/tools/" in str(request.url):
-        try:
-            body = await request.body()
-            if body:
-                print(f"📦 Request body: {body.decode()}")
-        except:
-            pass
     response = await call_next(request)
     print(f"✅ {request.method} {request.url.path} -> {response.status_code}")
     return response
 
 # -------------------------------------------------------
-# Run server
+# Run Server
 # -------------------------------------------------------
 if __name__ == "__main__":
     import uvicorn
-    print("🚀 Starting Trello MCP server at http://localhost:8000")
-    print("🔧 Ensure .env has TRELLO_KEY and TRELLO_TOKEN")
-    print("🌐 MCP Info: http://localhost:8000/.well-known/mcp")
-    print("🟢 Handshake SSE Ping: http://localhost:8000/sse/")
-    uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info", access_log=True)
+    port = int(os.environ.get("PORT", 10000))  # Render assigns dynamic port
+    print(f"🚀 Starting Trello MCP server on port {port}")
+    uvicorn.run(app, host="0.0.0.0", port=port)
