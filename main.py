@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Trello MCP-Compatible Connector Server - Final Stable (v6.0)
+Trello MCP-Compatible Connector Server - Fixed (v6.0.1)
 Author: Nuri Muhammet Birlik
 Compatible with ChatGPT MCP (protocol 2024-11-05)
 """
@@ -30,7 +30,7 @@ if not TRELLO_API_KEY or not TRELLO_TOKEN:
 app = FastAPI(
     title="Trello MCP Connector",
     description="MCP-compatible connector to access Trello boards and cards",
-    version="6.0.0"
+    version="6.0.1"
 )
 
 # CORS
@@ -95,19 +95,16 @@ def mcp_info_get():
 def mcp_options():
     return Response(status_code=204)
 
-# Redirect /sse/
-@app.get("/sse/")
-async def redirect_sse():
-    return RedirectResponse("/sse")
-
-# 🔥 SSE endpoint (supports POST + GET)
+# 🔥 SSE endpoint (fixed to handle both /sse and /sse/)
 @app.api_route("/sse", methods=["GET", "POST"])
+@app.api_route("/sse/", methods=["GET", "POST"])
 async def sse_endpoint(request: Request):
     """MCP-compatible SSE endpoint for ChatGPT"""
     print(f"🔌 MCP SSE connection via {request.method}")
 
     async def generate_events():
         try:
+            # Initial handshake
             hello = {
                 "protocol": "mcp",
                 "version": "2024-11-05",
@@ -116,6 +113,7 @@ async def sse_endpoint(request: Request):
             }
             yield f"event: hello\ndata: {json.dumps(hello)}\n\n"
 
+            # Ping loop
             count = 0
             while True:
                 await asyncio.sleep(2)
