@@ -4,8 +4,10 @@
   "servers": [
     {
       "type": "mcp",
-      "url": "https://trello-mcp-connector.onrender.com/sse/"
+      "label": "Trello MCP Connector",
+      "url": "https://trello-mcp-connector.onrender.com/sse/",
+      "allowed_tools": ["search", "fetch"],
+      "require_approval": "never"
     }
   ]
 }
-
