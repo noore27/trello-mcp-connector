@@ -4,7 +4,8 @@
   "servers": [
     {
       "type": "mcp",
-      "url": "https://connecting-suse-criterion-vehicles.trycloudflare.com/sse/"
+      "url": "https://trello-mcp-connector.onrender.com/sse/"
     }
   ]
 }
+
