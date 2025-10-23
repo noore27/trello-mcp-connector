@@ -5,7 +5,7 @@
     {
       "type": "mcp",
       "label": "Trello MCP Connector",
-      "url": "https://trello-mcp-connector.onrender.com/sse/",
+      "url": "https://trello-mcp-connector.onrender.com/.well-known/mcp",
       "allowed_tools": ["search", "fetch"],
       "require_approval": "never"
     }
