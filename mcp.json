@@ -1,0 +1,10 @@
+{
+  "name": "trello-mcp",
+  "description": "Remote Trello MCP Connector for Trello boards and cards",
+  "servers": [
+    {
+      "type": "mcp",
+      "url": "https://connecting-suse-criterion-vehicles.trycloudflare.com/sse/"
+    }
+  ]
+}
