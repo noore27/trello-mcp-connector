@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Trello MCP-Compatible Connector Server - Fixed (v6.0.1)
+Trello MCP-Compatible Connector Server - Final Stable (v6.1)
 Author: Nuri Muhammet Birlik
 Compatible with ChatGPT MCP (protocol 2024-11-05)
 """
@@ -12,7 +12,6 @@ import requests
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse, Response, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
 from dotenv import load_dotenv
 
 # Load .env
@@ -30,7 +29,7 @@ if not TRELLO_API_KEY or not TRELLO_TOKEN:
 app = FastAPI(
     title="Trello MCP Connector",
     description="MCP-compatible connector to access Trello boards and cards",
-    version="6.0.1"
+    version="6.1.0"
 )
 
 # CORS
@@ -95,16 +94,23 @@ def mcp_info_get():
 def mcp_options():
     return Response(status_code=204)
 
-# 🔥 SSE endpoint (fixed to handle both /sse and /sse/)
-@app.api_route("/sse", methods=["GET", "POST"])
-@app.api_route("/sse/", methods=["GET", "POST"])
+# 🧭 POST /sse → redirect to GET /sse
+@app.post("/sse")
+@app.post("/sse/")
+async def sse_post_redirect():
+    print("↩️ Received POST /sse → redirecting to GET /sse (307)")
+    return RedirectResponse(url="/sse", status_code=307)
+
+# 🔥 GET /sse → MCP SSE handshake
+@app.get("/sse")
+@app.get("/sse/")
 async def sse_endpoint(request: Request):
     """MCP-compatible SSE endpoint for ChatGPT"""
     print(f"🔌 MCP SSE connection via {request.method}")
 
     async def generate_events():
         try:
-            # Initial handshake
+            # Handshake mesajı
             hello = {
                 "protocol": "mcp",
                 "version": "2024-11-05",
@@ -113,7 +119,7 @@ async def sse_endpoint(request: Request):
             }
             yield f"event: hello\ndata: {json.dumps(hello)}\n\n"
 
-            # Ping loop
+            # Ping döngüsü
             count = 0
             while True:
                 await asyncio.sleep(2)
@@ -124,18 +130,17 @@ async def sse_endpoint(request: Request):
             err = {"error": str(e)}
             yield f"event: error\ndata: {json.dumps(err)}\n\n"
 
-    return StreamingResponse(
-        generate_events(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache, no-transform",
-            "Connection": "keep-alive",
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Headers": "*",
-            "Transfer-Encoding": "chunked",
-            "X-Accel-Buffering": "no",
-        },
-    )
+    headers = {
+        "Cache-Control": "no-cache, no-transform",
+        "Connection": "keep-alive",
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Headers": "*",
+        "Access-Control-Allow-Methods": "*",
+        "Transfer-Encoding": "chunked",
+        "X-Accel-Buffering": "no",
+    }
+
+    return StreamingResponse(generate_events(), media_type="text/event-stream", headers=headers)
 
 # Search Tool
 @app.post("/tools/search")
