@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Trello MCP-Compatible Connector Server - Final Stable (v6.2)
+Trello MCP-Compatible Connector Server - Final Stable (v6.3)
 Author: Nuri Muhammet Birlik
 Compatible with ChatGPT MCP (protocol 2024-11-05)
 """
@@ -29,7 +29,7 @@ if not TRELLO_API_KEY or not TRELLO_TOKEN:
 app = FastAPI(
     title="Trello MCP Connector",
     description="MCP-compatible connector to access Trello boards and cards",
-    version="6.2.0"
+    version="6.3.0"
 )
 
 # CORS
@@ -55,46 +55,73 @@ def trello_get(endpoint: str, params: dict = None):
 def root():
     return {"status": "ok", "message": "✅ Trello MCP Connector is running"}
 
-# MCP Discovery
-@app.get("/.well-known/mcp")
-def mcp_info_get():
+# ---------- MCP Discovery (GET/POST/OPTIONS) ----------
+def _mcp_discovery_payload():
     return {
         "name": "trello",
         "version": "1.0.0",
         "description": "Access Trello boards and cards",
         "protocolVersion": "2024-11-05",
-        "capabilities": {"resources": {}, "tools": {}},
+        # En kritik kısım: SSE capability ve path
+        "capabilities": {
+            "sse": {"path": "/sse"},
+            "resources": {},
+            "tools": {}
+        },
         "tools": [
             {
                 "name": "search",
                 "description": "Search Trello cards by keyword",
                 "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "query": {"type": "string", "description": "Search query"}
-                    },
-                    "required": ["query"],
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Search query"}
+                },
+                "required": ["query"],
                 },
             },
             {
                 "name": "fetch",
                 "description": "Fetch detailed info about a Trello card",
                 "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "card_id": {"type": "string", "description": "Trello card ID"}
-                    },
-                    "required": ["card_id"],
+                "type": "object",
+                "properties": {
+                    "card_id": {"type": "string", "description": "Trello card ID"}
+                },
+                "required": ["card_id"],
                 },
             },
         ],
     }
 
+def _json_ok(data: dict) -> JSONResponse:
+    headers = {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "*",
+        "Access-Control-Allow-Headers": "*",
+        "Cache-Control": "no-cache",
+        "Content-Type": "application/json",
+    }
+    return JSONResponse(content=data, headers=headers)
+
+@app.get("/.well-known/mcp")
+def mcp_info_get():
+    return _json_ok(_mcp_discovery_payload())
+
+@app.post("/.well-known/mcp")
+def mcp_info_post():
+    # Bazı istemciler discovery'e POST atıyor; 405 yerine aynı payload'ı dön.
+    return _json_ok(_mcp_discovery_payload())
+
 @app.options("/.well-known/mcp")
 def mcp_options():
-    return Response(status_code=204)
+    return Response(status_code=204, headers={
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "*",
+        "Access-Control-Allow-Headers": "*",
+    })
 
-# 🔥 GET + POST /sse → bağımsız SSE stream (redirect yok)
+# ---------- SSE (GET + POST) ----------
 @app.api_route("/sse", methods=["GET", "POST"])
 @app.api_route("/sse/", methods=["GET", "POST"])
 async def sse_endpoint(request: Request):
@@ -103,7 +130,7 @@ async def sse_endpoint(request: Request):
 
     async def generate_events():
         try:
-            # Handshake mesajı
+            # Handshake
             hello = {
                 "protocol": "mcp",
                 "version": "2024-11-05",
@@ -112,7 +139,7 @@ async def sse_endpoint(request: Request):
             }
             yield f"event: hello\ndata: {json.dumps(hello)}\n\n"
 
-            # Ping döngüsü
+            # Ping loop
             count = 0
             while True:
                 await asyncio.sleep(2)
@@ -135,7 +162,7 @@ async def sse_endpoint(request: Request):
 
     return StreamingResponse(generate_events(), media_type="text/event-stream", headers=headers)
 
-# Search Tool
+# ---------- Tools ----------
 @app.post("/tools/search")
 async def mcp_search(request: Request):
     try:
@@ -164,7 +191,12 @@ async def mcp_search(request: Request):
         ]
 
         print(f"✅ Found {len(results)} results")
-        return {"role": "assistant", "content": [{"type": "text", "text": json.dumps({"results": results}, ensure_ascii=False)}]}
+        return {
+            "role": "assistant",
+            "content": [
+                {"type": "text", "text": json.dumps({"results": results}, ensure_ascii=False)}
+            ]
+        }
 
     except Exception as e:
         print(f"❌ Search error: {e}")
@@ -173,7 +205,6 @@ async def mcp_search(request: Request):
             content={"role": "assistant", "content": [{"type": "text", "text": json.dumps({"error": str(e)})}]},
         )
 
-# Fetch Tool
 @app.post("/tools/fetch")
 async def mcp_fetch(request: Request):
     try:
@@ -213,7 +244,7 @@ async def mcp_fetch(request: Request):
             content={"role": "assistant", "content": [{"type": "text", "text": json.dumps({"error": str(e)})}]},
         )
 
-# Health Check
+# ---------- Health ----------
 @app.get("/health")
 def health_check():
     try:
@@ -222,7 +253,7 @@ def health_check():
     except Exception as e:
         return {"status": "unhealthy", "error": str(e)}
 
-# Logging
+# ---------- Logging ----------
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
     print(f"📡 {request.method} {request.url.path}")
@@ -230,7 +261,7 @@ async def log_requests(request: Request, call_next):
     print(f"✅ {request.method} {request.url.path} -> {response.status_code}")
     return response
 
-# Run
+# ---------- Run ----------
 if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 8080))
