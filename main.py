@@ -66,6 +66,11 @@ def root():
 # -------------------------------------------------------
 # MCP Metadata
 # -------------------------------------------------------
+@app.get("/mcp")
+@app.post("/mcp")
+def mcp_alias():
+    return mcp_info_get()
+
 @app.get("/.well-known/mcp")
 def mcp_info_get():
     """Discovery endpoint for MCP"""
