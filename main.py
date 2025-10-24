@@ -2,14 +2,29 @@
 """
 Trello MCP Connector - Full Version
 Author: Nuri Muhammet Birlik
-Version: 6.1 (Extended Tools Edition)
+Version: 6.2 (Extended Tools + Logging Edition)
 """
 
 import os
 import requests
+import logging
 from typing import Dict, List, Any
 from fastmcp import FastMCP
 from dotenv import load_dotenv
+
+# -------------------------------------------------------
+# Logging Setup
+# -------------------------------------------------------
+LOG_FILE = "trello_mcp.log"
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[
+        logging.FileHandler(LOG_FILE),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger("TrelloMCP")
 
 # -------------------------------------------------------
 # Load .env
@@ -35,8 +50,10 @@ def trello_get(endpoint: str, params: dict = None) -> Any:
         r.raise_for_status()
         return r.json()
     except requests.exceptions.HTTPError as e:
+        logger.error(f"HTTP error {r.status_code}: {r.text}")
         return {"error": f"HTTP {r.status_code} - {r.text}"}
     except Exception as e:
+        logger.error(str(e))
         return {"error": str(e)}
 
 
@@ -49,6 +66,7 @@ def trello_post(endpoint: str, data: dict) -> Any:
         r.raise_for_status()
         return r.json()
     except Exception as e:
+        logger.error(f"POST {endpoint} failed: {e}")
         return {"error": str(e)}
 
 
@@ -61,8 +79,8 @@ def trello_put(endpoint: str, data: dict) -> Any:
         r.raise_for_status()
         return r.json()
     except Exception as e:
+        logger.error(f"PUT {endpoint} failed: {e}")
         return {"error": str(e)}
-
 
 # -------------------------------------------------------
 # Pagination Helper
@@ -80,7 +98,7 @@ def paginate_search(query: str, limit_per_page: int = 50, max_pages: int = 5) ->
             "filter": "all"
         })
         if "error" in data:
-            print(f"⚠️ Error while searching: {data['error']}")
+            logger.warning(f"⚠️ Error while searching: {data['error']}")
             break
         cards = data.get("cards", [])
         if not cards:
@@ -89,7 +107,6 @@ def paginate_search(query: str, limit_per_page: int = 50, max_pages: int = 5) ->
         if len(cards) < limit_per_page:
             break
     return all_cards
-
 
 # -------------------------------------------------------
 # Initialize MCP server
@@ -123,10 +140,9 @@ async def overview() -> Dict[str, Any]:
                         "closed": l.get("closed", False)
                     })
             except Exception as e:
-                print(f"⚠️ Could not get lists for board {b.get('id')}: {e}")
+                logger.warning(f"Could not get lists for board {b.get('id')}: {e}")
 
     return {"workspaces": workspaces, "boards": boards, "lists": lists_data}
-
 
 # -------------------------------------------------------
 # Tool: Search Cards
@@ -145,7 +161,6 @@ async def search(query: str) -> Dict[str, Any]:
         "closed": c.get("closed", False)
     } for c in cards]
     return {"results": results}
-
 
 # -------------------------------------------------------
 # Tool: Fetch Card Details
@@ -203,18 +218,15 @@ async def fetch(card_id: str) -> Dict[str, Any]:
         }
     }
 
-
 # -------------------------------------------------------
 # 🧩 New Tools
 # -------------------------------------------------------
-
 @server.tool()
 async def create_card(list_id: str, name: str, desc: str = "") -> Dict[str, Any]:
     """Create a new Trello card."""
     data = {"idList": list_id, "name": name, "desc": desc}
     result = trello_post("cards", data)
     return result
-
 
 @server.tool()
 async def update_card(card_id: str, name: str = None, desc: str = None, due: str = None, closed: bool = None) -> Dict[str, Any]:
@@ -227,13 +239,11 @@ async def update_card(card_id: str, name: str = None, desc: str = None, due: str
     result = trello_put(f"cards/{card_id}", update_data)
     return result
 
-
 @server.tool()
 async def add_comment(card_id: str, text: str) -> Dict[str, Any]:
     """Add a comment to a card."""
     result = trello_post(f"cards/{card_id}/actions/comments", {"text": text})
     return result
-
 
 @server.tool()
 async def move_card(card_id: str, list_id: str) -> Dict[str, Any]:
@@ -241,13 +251,11 @@ async def move_card(card_id: str, list_id: str) -> Dict[str, Any]:
     result = trello_put(f"cards/{card_id}", {"idList": list_id})
     return result
 
-
 @server.tool()
 async def archive_card(card_id: str) -> Dict[str, Any]:
     """Archive (close) a card."""
     result = trello_put(f"cards/{card_id}/closed", {"value": "true"})
     return result
-
 
 # -------------------------------------------------------
 # Run
@@ -256,4 +264,11 @@ if __name__ == "__main__":
     print("🚀 Starting Trello MCP server on http://localhost:8000")
     print("🌐 MCP Discovery: http://localhost:8000/.well-known/mcp")
     print("🟢 SSE Handshake: /sse/")
+    print("\n🔧 Registered Tools:")
+    for tool_name, tool_data in server.tools.items():
+        print(f"   🛠️  {tool_name} → {tool_data.description}")
+        logger.info(f"Tool loaded: {tool_name}")
+    print("\n✅ Total Tools Loaded:", len(server.tools))
+    print("=" * 60)
+    logger.info(f"{len(server.tools)} tools loaded successfully.")
     server.run(transport="sse", host="0.0.0.0", port=8000)
