@@ -2,7 +2,7 @@
 """
 Trello MCP Connector - Full Version
 Author: Nuri Muhammet Birlik
-Version: 6.2 (Extended Tools + Logging Edition)
+Version: 6.3 (Extended Tools + Logging Fix)
 """
 
 import os
@@ -265,10 +265,23 @@ if __name__ == "__main__":
     print("🌐 MCP Discovery: http://localhost:8000/.well-known/mcp")
     print("🟢 SSE Handshake: /sse/")
     print("\n🔧 Registered Tools:")
-    for tool_name, tool_data in server.tools.items():
-        print(f"   🛠️  {tool_name} → {tool_data.description}")
-        logger.info(f"Tool loaded: {tool_name}")
-    print("\n✅ Total Tools Loaded:", len(server.tools))
+
+    # ✅ Safe for all FastMCP versions
+    try:
+        loaded_tools = getattr(server, "_tools", getattr(server, "registry", {}))
+        if loaded_tools:
+            for tool_name, tool_data in loaded_tools.items():
+                desc = getattr(tool_data, "description", "No description")
+                print(f"   🛠️  {tool_name} → {desc}")
+                logger.info(f"Tool loaded: {tool_name}")
+            print(f"\n✅ Total Tools Loaded: {len(loaded_tools)}")
+            logger.info(f"{len(loaded_tools)} tools loaded successfully.")
+        else:
+            print("⚠️ No tools found. Check your @server.tool() decorators.")
+            logger.warning("No tools found.")
+    except Exception as e:
+        print(f"❌ Error listing tools: {e}")
+        logger.error(f"Error listing tools: {e}")
+
     print("=" * 60)
-    logger.info(f"{len(server.tools)} tools loaded successfully.")
     server.run(transport="sse", host="0.0.0.0", port=8000)
