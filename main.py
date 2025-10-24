@@ -2,7 +2,7 @@
 """
 Trello MCP Connector - Full Version
 Author: Nuri Muhammet Birlik
-Version: 6.0 (Production Ready - Full Trello API Coverage)
+Version: 6.1 (Extended Tools Edition)
 """
 
 import os
@@ -39,10 +39,36 @@ def trello_get(endpoint: str, params: dict = None) -> Any:
     except Exception as e:
         return {"error": str(e)}
 
+
+def trello_post(endpoint: str, data: dict) -> Any:
+    """Generic POST helper."""
+    base_data = {"key": TRELLO_KEY, "token": TRELLO_TOKEN}
+    base_data.update(data)
+    try:
+        r = requests.post(f"{BASE_URL}/{endpoint}", data=base_data, timeout=20)
+        r.raise_for_status()
+        return r.json()
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def trello_put(endpoint: str, data: dict) -> Any:
+    """Generic PUT helper."""
+    base_data = {"key": TRELLO_KEY, "token": TRELLO_TOKEN}
+    base_data.update(data)
+    try:
+        r = requests.put(f"{BASE_URL}/{endpoint}", data=base_data, timeout=20)
+        r.raise_for_status()
+        return r.json()
+    except Exception as e:
+        return {"error": str(e)}
+
+
+# -------------------------------------------------------
+# Pagination Helper
+# -------------------------------------------------------
 def paginate_search(query: str, limit_per_page: int = 50, max_pages: int = 5) -> List[Dict[str, Any]]:
-    """
-    Manually handle Trello search pagination (since API caps results).
-    """
+    """Handle Trello search pagination."""
     all_cards = []
     for page in range(max_pages):
         data = trello_get("search", {
@@ -51,12 +77,11 @@ def paginate_search(query: str, limit_per_page: int = 50, max_pages: int = 5) ->
             "cards_limit": limit_per_page,
             "card_fields": "name,url,id,desc,closed",
             "cards_page": page,
-            "filter": "all"  # includes archived
+            "filter": "all"
         })
         if "error" in data:
             print(f"⚠️ Error while searching: {data['error']}")
             break
-
         cards = data.get("cards", [])
         if not cards:
             break
@@ -64,6 +89,7 @@ def paginate_search(query: str, limit_per_page: int = 50, max_pages: int = 5) ->
         if len(cards) < limit_per_page:
             break
     return all_cards
+
 
 # -------------------------------------------------------
 # Initialize MCP server
@@ -74,13 +100,11 @@ server = FastMCP(
 )
 
 # -------------------------------------------------------
-# Tool: Overview (Workspaces, Boards, Lists)
+# Tool: Overview
 # -------------------------------------------------------
 @server.tool()
 async def overview() -> Dict[str, Any]:
-    """
-    Fetch user's workspaces, boards, and lists.
-    """
+    """Fetch user's workspaces, boards, and lists."""
     workspaces = trello_get("members/me/organizations", {"fields": "displayName,name,id"})
     boards = trello_get("members/me/boards", {"fields": "name,id,closed,idOrganization,url"})
     lists_data = []
@@ -101,49 +125,37 @@ async def overview() -> Dict[str, Any]:
             except Exception as e:
                 print(f"⚠️ Could not get lists for board {b.get('id')}: {e}")
 
-    return {
-        "workspaces": workspaces,
-        "boards": boards,
-        "lists": lists_data
-    }
+    return {"workspaces": workspaces, "boards": boards, "lists": lists_data}
+
 
 # -------------------------------------------------------
-# Tool: Search Cards (Keyword)
+# Tool: Search Cards
 # -------------------------------------------------------
 @server.tool()
 async def search(query: str) -> Dict[str, Any]:
-    """
-    Search Trello cards by keyword across all boards (supports archived cards, pagination).
-    """
+    """Search Trello cards by keyword (includes archived)."""
     if not query.strip():
         return {"results": []}
-
     cards = paginate_search(query)
-    results = [
-        {
-            "id": c["id"],
-            "title": c.get("name", "No Title"),
-            "text": (c.get("desc")[:200] + "...") if c.get("desc") else "",
-            "url": c.get("url", ""),
-            "closed": c.get("closed", False)
-        }
-        for c in cards
-    ]
-
+    results = [{
+        "id": c["id"],
+        "title": c.get("name", "No Title"),
+        "text": (c.get("desc")[:200] + "...") if c.get("desc") else "",
+        "url": c.get("url", ""),
+        "closed": c.get("closed", False)
+    } for c in cards]
     return {"results": results}
+
 
 # -------------------------------------------------------
 # Tool: Fetch Card Details
 # -------------------------------------------------------
 @server.tool()
 async def fetch(card_id: str) -> Dict[str, Any]:
-    """
-    Get detailed info about a Trello card, including comments, attachments, and checklists.
-    """
+    """Get full info about a Trello card."""
     if not card_id.strip():
         return {"error": "Missing card_id"}
 
-    # Get main card details
     card = trello_get(f"cards/{card_id}", {
         "fields": "name,desc,url,dateLastActivity,idList,idBoard,due,closed",
         "checklists": "all",
@@ -155,19 +167,16 @@ async def fetch(card_id: str) -> Dict[str, Any]:
     if "error" in card:
         return {"error": card["error"]}
 
-    # Related info
     list_info = trello_get(f"lists/{card.get('idList')}", {"fields": "name,idBoard"})
     board_info = trello_get(f"boards/{card.get('idBoard')}", {"fields": "name,url,idOrganization"})
     org_info = {}
     if board_info.get("idOrganization"):
         org_info = trello_get(f"organizations/{board_info['idOrganization']}", {"fields": "displayName,name"})
 
-    # Comments
     comments = trello_get(f"cards/{card_id}/actions", {"filter": "commentCard", "limit": 100})
     if isinstance(comments, dict) and "error" in comments:
         comments = []
 
-    # Build response
     return {
         "id": card.get("id"),
         "title": card.get("name", "No Title"),
@@ -178,14 +187,12 @@ async def fetch(card_id: str) -> Dict[str, Any]:
         "members": card.get("members", []),
         "checklists": card.get("checklists", []),
         "attachments": card.get("attachments", []),
-        "comments": [
-            {
-                "id": c.get("id"),
-                "date": c.get("date"),
-                "memberCreator": c.get("memberCreator", {}).get("fullName"),
-                "text": c.get("data", {}).get("text", "")
-            } for c in comments if isinstance(c, dict)
-        ],
+        "comments": [{
+            "id": c.get("id"),
+            "date": c.get("date"),
+            "memberCreator": c.get("memberCreator", {}).get("fullName"),
+            "text": c.get("data", {}).get("text", "")
+        } for c in comments if isinstance(c, dict)],
         "metadata": {
             "source": "trello",
             "lastActivity": card.get("dateLastActivity"),
@@ -196,11 +203,57 @@ async def fetch(card_id: str) -> Dict[str, Any]:
         }
     }
 
+
+# -------------------------------------------------------
+# 🧩 New Tools
+# -------------------------------------------------------
+
+@server.tool()
+async def create_card(list_id: str, name: str, desc: str = "") -> Dict[str, Any]:
+    """Create a new Trello card."""
+    data = {"idList": list_id, "name": name, "desc": desc}
+    result = trello_post("cards", data)
+    return result
+
+
+@server.tool()
+async def update_card(card_id: str, name: str = None, desc: str = None, due: str = None, closed: bool = None) -> Dict[str, Any]:
+    """Update an existing Trello card."""
+    update_data = {}
+    if name: update_data["name"] = name
+    if desc: update_data["desc"] = desc
+    if due: update_data["due"] = due
+    if closed is not None: update_data["closed"] = str(closed).lower()
+    result = trello_put(f"cards/{card_id}", update_data)
+    return result
+
+
+@server.tool()
+async def add_comment(card_id: str, text: str) -> Dict[str, Any]:
+    """Add a comment to a card."""
+    result = trello_post(f"cards/{card_id}/actions/comments", {"text": text})
+    return result
+
+
+@server.tool()
+async def move_card(card_id: str, list_id: str) -> Dict[str, Any]:
+    """Move a card to another list."""
+    result = trello_put(f"cards/{card_id}", {"idList": list_id})
+    return result
+
+
+@server.tool()
+async def archive_card(card_id: str) -> Dict[str, Any]:
+    """Archive (close) a card."""
+    result = trello_put(f"cards/{card_id}/closed", {"value": "true"})
+    return result
+
+
 # -------------------------------------------------------
 # Run
 # -------------------------------------------------------
 if __name__ == "__main__":
     print("🚀 Starting Trello MCP server on http://localhost:8000")
     print("🌐 MCP Discovery: http://localhost:8000/.well-known/mcp")
-    print("🟢 SSE Handshake: /sse/ (handled automatically by FastMCP)")
+    print("🟢 SSE Handshake: /sse/")
     server.run(transport="sse", host="0.0.0.0", port=8000)
