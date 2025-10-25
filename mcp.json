@@ -6,7 +6,16 @@
       "type": "mcp",
       "label": "Trello MCP Connector",
       "url": "https://trello-mcp-connector.onrender.com/.well-known/mcp",
-      "allowed_tools": ["search", "fetch"],
+      "allowed_tools": [
+        "overview",
+        "search",
+        "fetch",
+        "create_card",
+        "update_card",
+        "add_comment",
+        "move_card",
+        "archive_card"
+      ],
       "require_approval": "never"
     }
   ]
